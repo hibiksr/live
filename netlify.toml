@@ -2,11 +2,11 @@
   functions = "netlify/functions"
 
 [[redirects]]
-  from = "/manifest.json"
-  to = "/.netlify/functions/addon"
+  from = "/addon/*"
+  to = "/.netlify/functions/addon/:splat"
   status = 200
 
 [[redirects]]
-  from = "/*"
-  to = "/.netlify/functions/addon/:splat"
+  from = "/manifest.json"
+  to = "/.netlify/functions/addon/manifest.json"
   status = 200

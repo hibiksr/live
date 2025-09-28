@@ -267,16 +267,21 @@ async function handleStream(type, id) {
 
 // ============ NETLIFY HANDLER ============
 exports.handler = async (event, context) => {
-    console.log('Event path:', event.path);
+    // Enhanced logging for debugging
+    console.log('=== REQUEST DEBUG ===');
+    console.log('Raw event.path:', event.path);
     console.log('HTTP method:', event.httpMethod);
+    console.log('Query params:', event.queryStringParameters);
+    console.log('Headers:', event.headers);
     
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json; charset=utf-8'
     };
     
+    // Handle CORS preflight
     if (event.httpMethod === 'OPTIONS') {
         return {
             statusCode: 200,
@@ -286,16 +291,33 @@ exports.handler = async (event, context) => {
     }
     
     try {
-        // Parse path
-        let path = event.path.replace('/.netlify/functions/addon', '');
-        if (path.startsWith('/')) {
-            path = path.substring(1);
+        // More robust path extraction
+        let path = event.path || '';
+        
+        // Try different path extraction methods
+        if (path.includes('/.netlify/functions/addon')) {
+            // Standard Netlify function path
+            path = path.split('/.netlify/functions/addon')[1] || '';
+        } else if (event.pathParameters && event.pathParameters.proxy) {
+            // Alternative: using proxy parameter
+            path = event.pathParameters.proxy || '';
         }
         
-        console.log('Processing path:', path);
+        // Clean up the path
+        path = path.replace(/^\/+/, ''); // Remove leading slashes
+        path = path.replace(/\/$/, ''); // Remove trailing slash
         
-        // Handle manifest
-        if (!path || path === 'manifest.json' || path === 'manifest') {
+        console.log('Processed path:', path);
+        console.log('Path parts:', path.split('/'));
+        
+        // Handle root and manifest requests
+        if (!path || 
+            path === 'manifest.json' || 
+            path === 'manifest' ||
+            path === '/' ||
+            path.endsWith('/manifest.json')) {
+            
+            console.log('Serving manifest');
             const catalogs = await buildCatalogs();
             const manifestWithCatalogs = { ...manifest, catalogs };
             
@@ -309,19 +331,25 @@ exports.handler = async (event, context) => {
             };
         }
         
-        // Parse Stremio path
+        // Parse Stremio addon path format
         const parts = path.split('/').filter(Boolean);
         
-        // Remove .json extension
-        if (parts.length > 0 && parts[parts.length - 1].endsWith('.json')) {
-            parts[parts.length - 1] = parts[parts.length - 1].slice(0, -5);
+        // Remove .json extension if present
+        if (parts.length > 0) {
+            const lastPart = parts[parts.length - 1];
+            if (lastPart.endsWith('.json')) {
+                parts[parts.length - 1] = lastPart.slice(0, -5);
+            }
         }
         
+        console.log('Path parts after processing:', parts);
+        
+        // Extract resource, type, and id
         const resource = parts[0];
         const type = parts[1];
         const id = parts[2];
         
-        // Parse extra parameters
+        // Parse extra parameters (key/value pairs after id)
         const extraParams = {};
         if (parts.length > 3) {
             for (let i = 3; i < parts.length; i += 2) {
@@ -331,10 +359,16 @@ exports.handler = async (event, context) => {
             }
         }
         
-        console.log('Request:', { resource, type, id, extraParams });
+        // Also check query parameters
+        if (event.queryStringParameters) {
+            Object.assign(extraParams, event.queryStringParameters);
+        }
         
-        // Handle catalog
+        console.log('Parsed request:', { resource, type, id, extraParams });
+        
+        // Handle catalog requests
         if (resource === 'catalog' && type && id) {
+            console.log('Handling catalog request');
             const result = await handleCatalog(type, id, extraParams);
             return {
                 statusCode: 200,
@@ -346,8 +380,9 @@ exports.handler = async (event, context) => {
             };
         }
         
-        // Handle stream
+        // Handle stream requests
         if (resource === 'stream' && type && id) {
+            console.log('Handling stream request');
             const result = await handleStream(type, id);
             return {
                 statusCode: 200,
@@ -359,18 +394,33 @@ exports.handler = async (event, context) => {
             };
         }
         
+        // If we get here, the path wasn't recognized
+        console.log('Path not recognized:', { path, resource, type, id });
+        
         return {
             statusCode: 404,
             headers,
-            body: JSON.stringify({ error: 'Not found', path })
+            body: JSON.stringify({ 
+                error: 'Not found', 
+                path: path,
+                parsed: { resource, type, id },
+                debug: {
+                    originalPath: event.path,
+                    processedPath: path,
+                    parts: parts
+                }
+            })
         };
         
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Handler error:', error);
         return {
             statusCode: 500,
             headers,
-            body: JSON.stringify({ error: error.message })
+            body: JSON.stringify({ 
+                error: error.message,
+                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            })
         };
     }
 };
