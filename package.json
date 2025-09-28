@@ -3,10 +3,8 @@
   "version": "1.0.0",
   "description": "IPTV addon for Stremio",
   "scripts": {
-    "dev": "netlify dev"
-  },
-  "devDependencies": {
-    "netlify-cli": "^17.38.1"
+    "dev": "netlify dev",
+    "deploy": "netlify deploy --prod"
   },
   "dependencies": {
     "@netlify/edge-functions-bootstrap": "^2.17.1"
