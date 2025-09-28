@@ -1,0 +1,19 @@
+{
+    "name": "stremio-iptv-addon",
+    "version": "1.0.0",
+    "description": "IPTV addon for Stremio with country and category organization",
+    "main": "netlify/functions/addon.js",
+    "scripts": {
+      "dev": "netlify dev",
+      "deploy": "netlify deploy --prod"
+    },
+    "dependencies": {
+      "node-fetch": "^3.3.0"
+    },
+    "devDependencies": {
+      "netlify-cli": "^17.0.0"
+    },
+    "engines": {
+      "node": ">=18.0.0"
+    }
+  }
