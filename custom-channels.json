@@ -16,7 +16,7 @@
       "channel": "custom.channel1",
       "title": "Kochu TV",
       "url": "https://live.dinesh29.com.np/stream/jiotvplus/kochutv/master.m3u8",
-      "quality": "576p",
+      "quality": "auto",
       "referrer": null,
       "user_agent": null
     }
