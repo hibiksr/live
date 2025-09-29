@@ -1,0 +1,24 @@
+{
+  "channels": [
+    {
+      "id": "custom.channel1",
+      "name": "Kochu TV",
+      "alt_names": [],
+      "country": "AU",
+      "categories": ["auto"],
+      "is_nsfw": false,
+      "launched": "2024-01-01",
+      "website": ""
+    }
+  ],
+  "streams": [
+    {
+      "channel": "custom.channel1",
+      "title": "Kochu TV",
+      "url": "https://live.dinesh29.com.np/stream/jiotvplus/kochutv/master.m3u8",
+      "quality": "576p",
+      "referrer": null,
+      "user_agent": null
+    }
+  ]
+}

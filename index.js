@@ -4,22 +4,26 @@ const axios = require('axios');
 const NodeCache = require('node-cache');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const { HttpProxyAgent } = require('http-proxy-agent');
+const fs = require('fs').promises;
+const path = require('path');
 
 // Constants
 const IPTV_CHANNELS_URL = 'https://iptv-org.github.io/api/channels.json';
 const IPTV_STREAMS_URL = 'https://iptv-org.github.io/api/streams.json';
+const CUSTOM_CHANNELS_FILE = process.env.CUSTOM_CHANNELS_FILE || './custom-channels.json';
 const PORT = process.env.PORT || 3000;
-const FETCH_INTERVAL = parseInt(process.env.FETCH_INTERVAL) || 86400000; // Fetch interval in milliseconds, default 1 day
-const PROXY_URL = process.env.PROXY_URL || ''; // Proxy URL for verification
-const FETCH_TIMEOUT = parseInt(process.env.FETCH_TIMEOUT) || 10000; // Fetch timeout in milliseconds, default 10 seconds
+const FETCH_INTERVAL = parseInt(process.env.FETCH_INTERVAL) || 86400000;
+const PROXY_URL = process.env.PROXY_URL || '';
+const FETCH_TIMEOUT = parseInt(process.env.FETCH_TIMEOUT) || 10000;
 
-// Configuration for channel filtering.
+// Configuration for channel filtering - automatically include AU if custom channels exist
 const config = {
     includeLanguages: process.env.INCLUDE_LANGUAGES ? process.env.INCLUDE_LANGUAGES.split(',') : [],
     includeCountries: process.env.INCLUDE_COUNTRIES ? process.env.INCLUDE_COUNTRIES.split(',') : ['GR'],
     excludeLanguages: process.env.EXCLUDE_LANGUAGES ? process.env.EXCLUDE_LANGUAGES.split(',') : [],
     excludeCountries: process.env.EXCLUDE_COUNTRIES ? process.env.EXCLUDE_COUNTRIES.split(',') : [],
     excludeCategories: process.env.EXCLUDE_CATEGORIES ? process.env.EXCLUDE_CATEGORIES.split(',') : [],
+    enableCustomChannels: process.env.ENABLE_CUSTOM_CHANNELS !== 'false' // Default to true
 };
 
 // Express app setup
@@ -27,13 +31,29 @@ const app = express();
 app.use(express.json());
 
 // Cache setup
-const cache = new NodeCache({ stdTTL: 0 }); // Set stdTTL to 0 for infinite TTL
+const cache = new NodeCache({ stdTTL: 0 });
 
-// Addon Manifest
-const manifest = {
+// Check if custom channels exist and add AU to countries if needed
+const initializeConfig = async () => {
+    try {
+        await fs.access(CUSTOM_CHANNELS_FILE);
+        if (!config.includeCountries.includes('AU')) {
+            config.includeCountries.push('AU');
+            console.log('Added AU to included countries for custom channels');
+        }
+    } catch (error) {
+        console.log('Custom channels file not found, skipping AU addition');
+    }
+};
+
+// Initialize config
+initializeConfig();
+
+// Addon Manifest - Dynamic based on config
+const getManifest = () => ({
     id: 'org.iptv',
     name: 'IPTV Addon',
-    version: '0.0.2',
+    version: '0.0.3',
     description: `Watch live TV from ${config.includeCountries.join(', ')}`,
     resources: ['catalog', 'meta', 'stream'],
     types: ['tv'],
@@ -45,8 +65,9 @@ const manifest = {
             {
                 name: 'genre',
                 isRequired: false,
-                "options": [
+                options: [
                     "animation",
+                    "auto",
                     "business",
                     "classic",
                     "comedy",
@@ -72,10 +93,8 @@ const manifest = {
                     "sports",
                     "travel",
                     "weather",
-                    "xxx",
-                    "auto"
+                    "xxx"
                 ]
-
             }
         ],
     })),
@@ -84,11 +103,62 @@ const manifest = {
     logo: "https://dl.strem.io/addon-logo.png",
     icon: "https://dl.strem.io/addon-logo.png",
     background: "https://dl.strem.io/addon-background.jpg",
-};
+});
 
-const addon = new addonBuilder(manifest);
+let manifest = getManifest();
+let addon = new addonBuilder(manifest);
 
 // Helper Functions
+
+// Load custom channels from JSON file
+const loadCustomChannels = async () => {
+    if (!config.enableCustomChannels) {
+        return { channels: [], streams: [] };
+    }
+
+    try {
+        const fileContent = await fs.readFile(CUSTOM_CHANNELS_FILE, 'utf8');
+        const customData = JSON.parse(fileContent);
+        
+        // Validate and format custom channels
+        const channels = (customData.channels || []).map(channel => ({
+            id: channel.id || `custom.${Date.now()}.${Math.random()}`,
+            name: channel.name || 'Unnamed Channel',
+            alt_names: channel.alt_names || [],
+            network: channel.network || null,
+            owners: channel.owners || [],
+            country: channel.country || 'AU',
+            categories: channel.categories || ['auto'],
+            is_nsfw: channel.is_nsfw || false,
+            launched: channel.launched || null,
+            closed: channel.closed || null,
+            replaced_by: channel.replaced_by || null,
+            website: channel.website || null,
+            logo: channel.logo || null,
+            isCustom: true // Mark as custom channel
+        }));
+
+        // Validate and format custom streams
+        const streams = (customData.streams || []).map(stream => ({
+            channel: stream.channel,
+            feed: stream.feed || null,
+            title: stream.title || 'Live Stream',
+            url: stream.url,
+            referrer: stream.referrer || null,
+            user_agent: stream.user_agent || null,
+            quality: stream.quality || null,
+            isCustom: true // Mark as custom stream
+        }));
+
+        console.log(`Loaded ${channels.length} custom channels and ${streams.length} custom streams`);
+        return { channels, streams };
+    } catch (error) {
+        if (error.code !== 'ENOENT') {
+            console.error('Error loading custom channels:', error);
+        }
+        return { channels: [], streams: [] };
+    }
+};
 
 // Convert channel to Stremio accepted Meta object
 const toMeta = (channel) => ({
@@ -100,6 +170,7 @@ const toMeta = (channel) => ({
     posterShape: 'square',
     background: channel.logo || null,
     logo: channel.logo || null,
+    isCustom: channel.isCustom || false
 });
 
 // Fetch and filter channels
@@ -111,7 +182,6 @@ const getChannels = async () => {
         return channelsResponse.data;
     } catch (error) {
         console.error('Error fetching channels:', error);
-        // If we fail to get new channels, serve from cache
         if (cache.has('channels')) {
             console.log('Serving channels from cache');
             return cache.get('channels');
@@ -135,7 +205,7 @@ const getStreamInfo = async () => {
     return cache.get('streams');
 };
 
-// Verify stream URL
+// Verify stream URL (keeping your existing function)
 const verifyStreamURL = async (url, userAgent, httpReferrer) => {
     const cachedResult = cache.get(url);
     if (cachedResult !== undefined) {
@@ -181,39 +251,57 @@ const verifyStreamURL = async (url, userAgent, httpReferrer) => {
     }
 };
 
-// Get all channel information
+// Get all channel information - UPDATED to include custom channels
 const getAllInfo = async () => {
     if (cache.has('channelsInfo')) {
         return cache.get('channelsInfo');
     }
 
-    const streams = await getStreamInfo();
-    const channels = await getChannels();
+    // Load API channels and streams
+    const apiStreams = await getStreamInfo();
+    const apiChannels = await getChannels();
 
-    if (!channels) {
-        console.log('Failed to fetch channels, using cached data if available');
+    // Load custom channels and streams
+    const customData = await loadCustomChannels();
+
+    // Combine channels and streams
+    const allChannels = [...(apiChannels || []), ...customData.channels];
+    const allStreams = [...apiStreams, ...customData.streams];
+
+    if (!allChannels.length) {
+        console.log('No channels available');
         return cache.get('channelsInfo') || [];
     }
 
-    const streamMap = new Map(streams.map(stream => [stream.channel, stream]));
+    // Create stream map
+    const streamMap = new Map(allStreams.map(stream => [stream.channel, stream]));
 
-    const filteredChannels = channels.filter((channel) => {
+    // Filter channels based on config
+    const filteredChannels = allChannels.filter((channel) => {
+        // Skip filtering for custom channels if they're from AU
+        if (channel.isCustom && channel.country === 'AU') {
+            return streamMap.has(channel.id);
+        }
+
         if (config.includeCountries.length > 0 && !config.includeCountries.includes(channel.country)) return false;
         if (config.excludeCountries.length > 0 && config.excludeCountries.includes(channel.country)) return false;
-        if (config.includeLanguages.length > 0 && !channel.languages.some(lang => config.includeLanguages.includes(lang))) return false;
-        if (config.excludeLanguages.length > 0 && channel.languages.some(lang => config.excludeLanguages.includes(lang))) return false;
-        if (config.excludeCategories.some(cat => channel.categories.includes(cat))) return false;
+        if (channel.languages) {
+            if (config.includeLanguages.length > 0 && !channel.languages.some(lang => config.includeLanguages.includes(lang))) return false;
+            if (config.excludeLanguages.length > 0 && channel.languages.some(lang => config.excludeLanguages.includes(lang))) return false;
+        }
+        if (config.excludeCategories.some(cat => channel.categories && channel.categories.includes(cat))) return false;
         return streamMap.has(channel.id);
     });
 
+    // Process channels with stream details
     const channelsWithDetails = await Promise.all(filteredChannels.map(async (channel) => {
         const streamInfo = streamMap.get(channel.id);
         if (streamInfo) {
             const meta = toMeta(channel);
             meta.streamInfo = {
                 url: streamInfo.url,
-                title: 'Live Stream',
-                httpReferrer: streamInfo.http_referrer
+                title: streamInfo.title || 'Live Stream',
+                httpReferrer: streamInfo.referrer || streamInfo.http_referrer
             };
             return meta;
         }
@@ -221,12 +309,14 @@ const getAllInfo = async () => {
     }));
 
     const filteredChannelsInfo = channelsWithDetails.filter(Boolean);
+    
+    console.log(`Total channels: ${filteredChannelsInfo.length} (API: ${filteredChannelsInfo.filter(c => !c.isCustom).length}, Custom: ${filteredChannelsInfo.filter(c => c.isCustom).length})`);
+    
     cache.set('channelsInfo', filteredChannelsInfo);
-
     return filteredChannelsInfo;
 };
 
-// Addon Handlers
+// Addon Handlers (keeping your existing handlers)
 
 // Catalog Handler
 addon.defineCatalogHandler(async ({ type, id, extra }) => {
@@ -242,7 +332,7 @@ addon.defineCatalogHandler(async ({ type, id, extra }) => {
             );
         }
 
-        console.log(`Serving catalog for ${country} with ${filteredChannels.length} channels`);
+        console.log(`Serving catalog for ${country} with ${filteredChannels.length} channels${extra?.genre ? ` (genre: ${extra.genre})` : ''}`);
         return { metas: filteredChannels };
     }
     return { metas: [] };
@@ -266,7 +356,7 @@ addon.defineStreamHandler(async ({ type, id }) => {
         const channels = await getAllInfo();
         const channel = channels.find((meta) => meta.id === id);
         if (channel?.streamInfo) {
-            console.log("Serving stream id: ", channel.id);
+            console.log(`Serving stream id: ${channel.id}${channel.isCustom ? ' [CUSTOM]' : ''}`);
             return { streams: [channel.streamInfo] };
         } else {
             console.log('No matching stream found for channelID:', id);
@@ -275,18 +365,25 @@ addon.defineStreamHandler(async ({ type, id }) => {
     return { streams: [] };
 });
 
-// Server setup
-app.get('/manifest.json', (req, res) => {
+// Server setup - Dynamic manifest
+app.get('/manifest.json', async (req, res) => {
+    // Reinitialize config to check for custom channels
+    await initializeConfig();
+    manifest = getManifest();
+    addon = new addonBuilder(manifest);
+    
     res.setHeader('Content-Type', 'application/json');
     res.json(manifest);
 });
 
 serveHTTP(addon.getInterface(), { server: app, path: '/manifest.json', port: PORT });
 
-
 // Cache management
 const fetchAndCacheInfo = async () => {
     try {
+        // Clear the cache to force reload of custom channels
+        cache.del('channelsInfo');
+        
         const metas = await getAllInfo();
         console.log(`${metas.length} channel(s) information cached successfully`);
     } catch (error) {
@@ -294,8 +391,31 @@ const fetchAndCacheInfo = async () => {
     }
 };
 
+// Watch for changes in custom channels file
+if (config.enableCustomChannels) {
+    const fs = require('fs');
+    const watchFile = () => {
+        try {
+            fs.watchFile(CUSTOM_CHANNELS_FILE, { interval: 5000 }, (curr, prev) => {
+                if (curr.mtime !== prev.mtime) {
+                    console.log('Custom channels file changed, reloading...');
+                    cache.del('channelsInfo');
+                    fetchAndCacheInfo();
+                }
+            });
+            console.log('Watching custom channels file for changes');
+        } catch (error) {
+            console.log('Not watching custom channels file:', error.message);
+        }
+    };
+    watchFile();
+}
+
 // Initial fetch
 fetchAndCacheInfo();
 
 // Schedule fetch based on FETCH_INTERVAL
 setInterval(fetchAndCacheInfo, FETCH_INTERVAL);
+
+console.log(`IPTV Addon server running on port ${PORT}`);
+console.log(`Custom channels: ${config.enableCustomChannels ? 'Enabled' : 'Disabled'}`);
