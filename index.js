@@ -1,4 +1,5 @@
-const { addonBuilder } = require('stremio-addon-sdk');
+const express = require('express');
+const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const axios = require('axios');
 const NodeCache = require('node-cache');
 const { SocksProxyAgent } = require('socks-proxy-agent');
@@ -7,10 +8,12 @@ const { HttpProxyAgent } = require('http-proxy-agent');
 // Constants
 const IPTV_CHANNELS_URL = 'https://iptv-org.github.io/api/channels.json';
 const IPTV_STREAMS_URL = 'https://iptv-org.github.io/api/streams.json';
-const PROXY_URL = process.env.PROXY_URL || '';
-const FETCH_TIMEOUT = parseInt(process.env.FETCH_TIMEOUT) || 10000;
+const PORT = process.env.PORT || 3000;
+const FETCH_INTERVAL = parseInt(process.env.FETCH_INTERVAL) || 86400000; // Fetch interval in milliseconds, default 1 day
+const PROXY_URL = process.env.PROXY_URL || ''; // Proxy URL for verification
+const FETCH_TIMEOUT = parseInt(process.env.FETCH_TIMEOUT) || 10000; // Fetch timeout in milliseconds, default 10 seconds
 
-// Configuration for channel filtering
+// Configuration for channel filtering.
 const config = {
     includeLanguages: process.env.INCLUDE_LANGUAGES ? process.env.INCLUDE_LANGUAGES.split(',') : [],
     includeCountries: process.env.INCLUDE_COUNTRIES ? process.env.INCLUDE_COUNTRIES.split(',') : ['GR'],
@@ -19,8 +22,12 @@ const config = {
     excludeCategories: process.env.EXCLUDE_CATEGORIES ? process.env.EXCLUDE_CATEGORIES.split(',') : [],
 };
 
-// Cache setup - Note: This cache will be per function invocation in serverless
-const cache = new NodeCache({ stdTTL: 300 }); // 5 minutes cache
+// Express app setup
+const app = express();
+app.use(express.json());
+
+// Cache setup
+const cache = new NodeCache({ stdTTL: 0 }); // Set stdTTL to 0 for infinite TTL
 
 // Addon Manifest
 const manifest = {
@@ -38,14 +45,37 @@ const manifest = {
             {
                 name: 'genre',
                 isRequired: false,
-                options: [
-                    "animation", "business", "classic", "comedy", "cooking",
-                    "culture", "documentary", "education", "entertainment",
-                    "family", "kids", "legislative", "lifestyle", "movies",
-                    "music", "general", "religious", "news", "outdoor",
-                    "relax", "series", "science", "shop", "sports",
-                    "travel", "weather", "xxx", "auto"
+                "options": [
+                    "animation",
+                    "business",
+                    "classic",
+                    "comedy",
+                    "cooking",
+                    "culture",
+                    "documentary",
+                    "education",
+                    "entertainment",
+                    "family",
+                    "kids",
+                    "legislative",
+                    "lifestyle",
+                    "movies",
+                    "music",
+                    "general",
+                    "religious",
+                    "news",
+                    "outdoor",
+                    "relax",
+                    "series",
+                    "science",
+                    "shop",
+                    "sports",
+                    "travel",
+                    "weather",
+                    "xxx",
+                    "auto"
                 ]
+
             }
         ],
     })),
@@ -56,7 +86,11 @@ const manifest = {
     background: "https://dl.strem.io/addon-background.jpg",
 };
 
+const addon = new addonBuilder(manifest);
+
 // Helper Functions
+
+// Convert channel to Stremio accepted Meta object
 const toMeta = (channel) => ({
     id: `iptv-${channel.id}`,
     name: channel.name,
@@ -68,29 +102,55 @@ const toMeta = (channel) => ({
     logo: channel.logo || null,
 });
 
+// Fetch and filter channels
 const getChannels = async () => {
+    console.log("Downloading channels");
     try {
         const channelsResponse = await axios.get(IPTV_CHANNELS_URL, { timeout: FETCH_TIMEOUT });
+        console.log("Finished downloading channels");
         return channelsResponse.data;
     } catch (error) {
         console.error('Error fetching channels:', error);
+        // If we fail to get new channels, serve from cache
+        if (cache.has('channels')) {
+            console.log('Serving channels from cache');
+            return cache.get('channels');
+        }
         return null;
     }
 };
 
+// Fetch Stream Info for the Channel
 const getStreamInfo = async () => {
-    try {
-        const streamsResponse = await axios.get(IPTV_STREAMS_URL, { timeout: FETCH_TIMEOUT });
-        return streamsResponse.data;
-    } catch (error) {
-        console.error('Error fetching streams:', error);
-        return [];
+    if (!cache.has('streams')) {
+        console.log("Downloading streams data");
+        try {
+            const streamsResponse = await axios.get(IPTV_STREAMS_URL, { timeout: FETCH_TIMEOUT });
+            cache.set('streams', streamsResponse.data);
+        } catch (error) {
+            console.error('Error fetching streams:', error);
+            return [];
+        }
     }
+    return cache.get('streams');
 };
 
+// Verify stream URL
 const verifyStreamURL = async (url, userAgent, httpReferrer) => {
+    const cachedResult = cache.get(url);
+    if (cachedResult !== undefined) {
+        return cachedResult;
+    }
+
     const effectiveUserAgent = userAgent || 'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Safari/537.36 DMOST/2.0.0 (; LGE; webOSTV; WEBOS6.3.2 03.34.95; W6_lm21a;)';
     const effectiveReferer = httpReferrer || '';
+
+    if (effectiveUserAgent !== 'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Safari/537.36 DMOST/2.0.0 (; LGE; webOSTV; WEBOS6.3.2 03.34.95; W6_lm21a;)') {
+        console.log(`Using User-Agent: ${effectiveUserAgent}`);
+    }
+    if (httpReferrer) {
+        console.log(`Using Referer: ${effectiveReferer}`);
+    }
 
     let axiosConfig = {
         timeout: FETCH_TIMEOUT,
@@ -111,18 +171,28 @@ const verifyStreamURL = async (url, userAgent, httpReferrer) => {
 
     try {
         const response = await axios.head(url, axiosConfig);
-        return response.status === 200;
+        const result = response.status === 200;
+        cache.set(url, result);
+        return result;
     } catch (error) {
         console.log(`Stream URL verification failed for ${url}:`, error.message);
+        cache.set(url, false);
         return false;
     }
 };
 
+// Get all channel information
 const getAllInfo = async () => {
-    const [streams, channels] = await Promise.all([getStreamInfo(), getChannels()]);
+    if (cache.has('channelsInfo')) {
+        return cache.get('channelsInfo');
+    }
+
+    const streams = await getStreamInfo();
+    const channels = await getChannels();
 
     if (!channels) {
-        return [];
+        console.log('Failed to fetch channels, using cached data if available');
+        return cache.get('channelsInfo') || [];
     }
 
     const streamMap = new Map(streams.map(stream => [stream.channel, stream]));
@@ -136,11 +206,9 @@ const getAllInfo = async () => {
         return streamMap.has(channel.id);
     });
 
-    // Note: Stream verification removed for serverless due to timeout constraints
-    // You may want to implement this as a separate background job
-    const channelsWithDetails = filteredChannels.map((channel) => {
+    const channelsWithDetails = await Promise.all(filteredChannels.map(async (channel) => {
         const streamInfo = streamMap.get(channel.id);
-        if (streamInfo) {
+        if (streamInfo && await verifyStreamURL(streamInfo.url, streamInfo.user_agent, streamInfo.http_referrer)) {
             const meta = toMeta(channel);
             meta.streamInfo = {
                 url: streamInfo.url,
@@ -150,13 +218,15 @@ const getAllInfo = async () => {
             return meta;
         }
         return null;
-    }).filter(Boolean);
+    }));
 
-    return channelsWithDetails;
+    const filteredChannelsInfo = channelsWithDetails.filter(Boolean);
+    cache.set('channelsInfo', filteredChannelsInfo);
+
+    return filteredChannelsInfo;
 };
 
-// Create addon
-const addon = new addonBuilder(manifest);
+// Addon Handlers
 
 // Catalog Handler
 addon.defineCatalogHandler(async ({ type, id, extra }) => {
@@ -172,6 +242,7 @@ addon.defineCatalogHandler(async ({ type, id, extra }) => {
             );
         }
 
+        console.log(`Serving catalog for ${country} with ${filteredChannels.length} channels`);
         return { metas: filteredChannels };
     }
     return { metas: [] };
@@ -195,10 +266,36 @@ addon.defineStreamHandler(async ({ type, id }) => {
         const channels = await getAllInfo();
         const channel = channels.find((meta) => meta.id === id);
         if (channel?.streamInfo) {
+            console.log("Serving stream id: ", channel.id);
             return { streams: [channel.streamInfo] };
+        } else {
+            console.log('No matching stream found for channelID:', id);
         }
     }
     return { streams: [] };
 });
 
-module.exports = { addon, manifest };
+// Server setup
+app.get('/manifest.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json(manifest);
+});
+
+serveHTTP(addon.getInterface(), { server: app, path: '/manifest.json', port: PORT });
+
+
+// Cache management
+const fetchAndCacheInfo = async () => {
+    try {
+        const metas = await getAllInfo();
+        console.log(`${metas.length} channel(s) information cached successfully`);
+    } catch (error) {
+        console.error('Error caching channel information:', error);
+    }
+};
+
+// Initial fetch
+fetchAndCacheInfo();
+
+// Schedule fetch based on FETCH_INTERVAL
+setInterval(fetchAndCacheInfo, FETCH_INTERVAL);
