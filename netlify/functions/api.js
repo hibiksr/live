@@ -1,5 +1,6 @@
 const express = require('express');
 const serverless = require('serverless-http');
+const cors = require('cors'); // <-- ADD THIS LINE
 const { addonBuilder } = require('stremio-addon-sdk');
 const axios = require('axios');
 const NodeCache = require('node-cache');
@@ -22,13 +23,13 @@ const config = {
 };
 
 // Cache setup
-const cache = new NodeCache({ stdTTL: 300, checkperiod: 120 }); // Cache items for 5 minutes
+const cache = new NodeCache({ stdTTL: 300, checkperiod: 120 });
 
 // Manifest
 const manifest = {
     id: 'org.iptv.netlify',
     name: 'IPTV Addon (Netlify)',
-    version: '0.0.4',
+    version: '0.0.5', // Incremented version
     description: `Watch live TV from ${config.includeCountries.join(', ')}`,
     resources: ['catalog', 'meta', 'stream'],
     types: ['tv'],
@@ -51,6 +52,13 @@ const manifest = {
     })),
     idPrefixes: ['iptv-'],
     logo: "https://dl.strem.io/addon-logo.png",
+    // --- ADDED MISSING PROPERTIES ---
+    icon: "https://dl.strem.io/addon-logo.png",
+    background: "https://dl.strem.io/addon-background.jpg",
+    behaviorHints: {
+        configurable: false,
+        configurationRequired: false
+    }
 };
 
 const addon = new addonBuilder(manifest);
@@ -113,6 +121,10 @@ addon.defineStreamHandler(async (args) => {
 
 // ---- SERVERLESS HANDLER ----
 const app = express();
+
+// --- ENABLE CORS ---
+app.use(cors());
+
 const addonInterface = addon.getInterface();
 
 // Manually create routes
@@ -125,13 +137,15 @@ app.get('/manifest.json', (req, res) => {
 // All other routes are handled by the addon interface handlers
 app.get('/:resource/:type/:id/:extra?.json', (req, res) => {
     const { resource, type, id } = req.params;
-    const extra = req.params.extra ? JSON.parse(req.params.extra) : {};
+    // ... (This part remains unchanged) ...
 
-    if (!addonInterface[resource]) {
+    const handler = addonInterface[resource];
+    if (!handler) {
         return res.status(404).send('Not Found');
     }
 
-    addonInterface[resource]({ type, id, extra })
+    const extra = req.params.extra ? JSON.parse(req.params.extra) : {};
+    handler({ type, id, extra })
         .then(result => {
             res.setHeader('Content-Type', 'application/json');
             res.send(result);
