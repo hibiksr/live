@@ -208,7 +208,7 @@ const getAllInfo = async () => {
 
     const channelsWithDetails = await Promise.all(filteredChannels.map(async (channel) => {
         const streamInfo = streamMap.get(channel.id);
-        if (streamInfo && await verifyStreamURL(streamInfo.url, streamInfo.user_agent, streamInfo.http_referrer)) {
+        if (streamInfo) {
             const meta = toMeta(channel);
             meta.streamInfo = {
                 url: streamInfo.url,
