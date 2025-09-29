@@ -1,12 +1,21 @@
 {
-  "name": "stremio-iptv-addon",
+  "name": "iptv-stremio-netlify",
   "version": "1.0.0",
-  "description": "IPTV addon for Stremio",
+  "description": "IPTV Stremio Addon for Netlify",
+  "main": "netlify/functions/api.js",
   "scripts": {
-    "dev": "netlify dev",
-    "deploy": "netlify deploy --prod"
+    "start": "netlify dev"
   },
   "dependencies": {
-    "@netlify/edge-functions-bootstrap": "^2.17.1"
+    "axios": "^1.6.0",
+    "express": "^4.18.2",
+    "http-proxy-agent": "^7.0.0",
+    "node-cache": "^5.1.2",
+    "serverless-http": "^3.2.0",
+    "socks-proxy-agent": "^8.0.2",
+    "stremio-addon-sdk": "^1.6.10"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
   }
 }

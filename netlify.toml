@@ -1,19 +1,11 @@
 [build]
+  # This command installs the dependencies from package.json
+  command = "npm install"
+  # This specifies the directory where your serverless functions are located
   functions = "netlify/functions"
 
 [[redirects]]
-  from = "/addon/*"
-  to = "/.netlify/functions/addon/:splat"
+  # This rule rewrites all requests to your serverless function
+  from = "/*"
+  to = "/.netlify/functions/api/:splat"
   status = 200
-
-[[redirects]]
-  from = "/manifest.json"
-  to = "/.netlify/functions/addon/manifest.json"
-  status = 200
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    Access-Control-Allow-Origin = "*"
-    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
-    Access-Control-Allow-Headers = "*"
