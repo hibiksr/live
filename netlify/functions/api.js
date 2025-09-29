@@ -4,6 +4,7 @@ const axios = require('axios');
 const NodeCache = require('node-cache');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const { HttpProxyAgent } = require('http-proxy-agent');
+const { getRouter } = require('stremio-addon-express');
 const serverless = require('serverless-http'); // <-- ADD THIS LINE
 
 // Constants
@@ -258,13 +259,11 @@ app.get('/manifest.json', (req, res) => {
 
 //  ---- MODIFICATION FOR NETLIFY ----
 
-// This creates an Express router from your addon handlers
-const router = express.Router();
 const addonInterface = addon.getInterface();
-router.use('/', addonInterface.router);
+const router = getRouter(addonInterface);
 
-// Mount the router onto the main app
-app.use('/.netlify/functions/api', router);
+// Use the router directly on the app. It will handle paths like /manifest.json
+app.use(router);
 
 // Export the handler for Netlify
 module.exports.handler = serverless(app);
