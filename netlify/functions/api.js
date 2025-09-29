@@ -4,7 +4,7 @@ const axios = require('axios');
 const NodeCache = require('node-cache');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const { HttpProxyAgent } = require('http-proxy-agent');
-const { getRouter } = require('stremio-addon-express');
+const { getRouter } = require('@stremio/stremio-addon-express');
 const serverless = require('serverless-http'); // <-- ADD THIS LINE
 
 // Constants

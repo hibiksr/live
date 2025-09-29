@@ -13,7 +13,7 @@
     "node-cache": "^5.1.2",
     "serverless-http": "^3.2.0",
     "socks-proxy-agent": "^8.0.2",
-    "stremio-addon-express": "^0.0.9",
+    "@stremio/stremio-addon-express": "^1.1.1",
     "stremio-addon-sdk": "^1.6.10"
   },
   "devDependencies": {
