@@ -135,26 +135,36 @@ app.get('/manifest.json', (req, res) => {
 });
 
 // All other routes are handled by the addon interface handlers
-app.get('/:resource/:type/:id/:extra?.json', (req, res) => {
+// All other routes are handled by the addon interface handlers
+app.get('/:resource/:type/:id/:extra?.json', async (req, res) => {
     const { resource, type, id } = req.params;
-    // ... (This part remains unchanged) ...
 
     const handler = addonInterface[resource];
     if (!handler) {
+        console.log(`No handler for resource: ${resource}`);
         return res.status(404).send('Not Found');
     }
 
-    const extra = req.params.extra ? JSON.parse(req.params.extra) : {};
-    handler({ type, id, extra })
-        .then(result => {
-            res.setHeader('Content-Type', 'application/json');
-            res.send(result);
-            res.end();
-        })
-        .catch(err => {
-            console.error(err);
-            res.status(500).send('Internal Server Error');
-        });
+    // Correctly parse the 'extra' parameter string (e.g., "genre=Sports")
+    const extra = req.params.extra ?
+        req.params.extra.split('&').reduce((acc, pair) => {
+            const [key, value] = pair.split('=').map(decodeURIComponent);
+            if (acc[key]) {
+                acc[key] = Array.isArray(acc[key]) ? [...acc[key], value] : [acc[key], value];
+            } else {
+                acc[key] = value;
+            }
+            return acc;
+        }, {}) : {};
+
+    try {
+        const result = await handler({ type, id, extra });
+        res.setHeader('Content-Type', 'application/json');
+        res.send(result);
+    } catch (err) {
+        console.error(`Error in handler for resource: ${resource}`, err);
+        res.status(500).send('Internal Server Error');
+    }
 });
 
 module.exports.handler = serverless(app);
