@@ -93,7 +93,7 @@ const getManifest = () => ({
                     "sports",
                     "travel",
                     "weather",
-                    "xxx"
+                    "love_custom"
                 ]
             }
         ],
