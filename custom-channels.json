@@ -14,7 +14,7 @@
     },
     {
       "id": "custom.trbeinsports2hd",
-      "name": "TR: BEIN SPORTS 1 HD*",
+      "name": "TR: BEIN SPORTS 2 HD*",
       "alt_names": [],
       "country": "AU",
       "categories": [
@@ -24,7 +24,6 @@
       "launched": null,
       "website": ""
     }
-    
   ],
   "streams": [
     {
@@ -37,7 +36,7 @@
     },
     {
       "channel": "custom.trbeinsports2hd",
-      "title": "TR: BEIN SPORTS 1 HD*",
+      "title": "TR: BEIN SPORTS 2 HD*",
       "url": "http://viphlvp.xyz:8080/VIP017091755351711557/9ba665db60c6/141359",
       "quality": "auto",
       "referrer": null,

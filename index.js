@@ -17,6 +17,38 @@ const FETCH_INTERVAL = parseInt(process.env.FETCH_INTERVAL) || 86400000;
 const PROXY_URL = process.env.PROXY_URL || '';
 const FETCH_TIMEOUT = parseInt(process.env.FETCH_TIMEOUT) || 10000;
 
+// Standard genre list
+const STANDARD_GENRES = [
+    "animation",
+    "auto",
+    "business",
+    "classic",
+    "comedy",
+    "cooking",
+    "culture",
+    "documentary",
+    "education",
+    "entertainment",
+    "family",
+    "kids",
+    "legislative",
+    "lifestyle",
+    "movies",
+    "music",
+    "general",
+    "religious",
+    "news",
+    "outdoor",
+    "relax",
+    "series",
+    "science",
+    "shop",
+    "sports",
+    "travel",
+    "weather",
+    "xxx"
+];
+
 // Configuration for channel filtering
 const config = {
     includeLanguages: process.env.INCLUDE_LANGUAGES ? process.env.INCLUDE_LANGUAGES.split(',') : [],
@@ -25,7 +57,7 @@ const config = {
     excludeCountries: process.env.EXCLUDE_COUNTRIES ? process.env.EXCLUDE_COUNTRIES.split(',') : [],
     excludeCategories: process.env.EXCLUDE_CATEGORIES ? process.env.EXCLUDE_CATEGORIES.split(',') : [],
     enableCustomChannels: process.env.ENABLE_CUSTOM_CHANNELS !== 'false',
-    customCategories: [] // Will be populated dynamically
+    allGenres: [...STANDARD_GENRES] // Will be populated with custom genres
 };
 
 // Express app setup
@@ -38,24 +70,24 @@ const cache = new NodeCache({ stdTTL: 0 });
 // Load custom channels from JSON file
 const loadCustomChannels = async () => {
     if (!config.enableCustomChannels) {
-        return { channels: [], streams: [], categories: [] };
+        return { channels: [], streams: [], customGenres: [] };
     }
 
     try {
         const fileContent = await fs.readFile(CUSTOM_CHANNELS_FILE, 'utf8');
         const customData = JSON.parse(fileContent);
         
-        // Extract unique custom categories
-        const customCategories = new Set();
+        // Extract unique custom categories from all channels
+        const customGenresSet = new Set();
         
         // Validate and format custom channels
         const channels = (customData.channels || []).map(channel => {
-            const channelCategories = channel.custom_categories || channel.categories || ['auto'];
+            const channelCategories = channel.categories || ['auto'];
             
-            // Add custom categories to the set
+            // Identify custom genres (not in standard list)
             channelCategories.forEach(cat => {
-                if (cat !== 'auto') {
-                    customCategories.add(cat);
+                if (!STANDARD_GENRES.includes(cat.toLowerCase())) {
+                    customGenresSet.add(cat);
                 }
             });
             
@@ -67,7 +99,6 @@ const loadCustomChannels = async () => {
                 owners: channel.owners || [],
                 country: channel.country || 'AU',
                 categories: channelCategories,
-                custom_categories: channel.custom_categories || [],
                 is_nsfw: channel.is_nsfw || false,
                 launched: channel.launched || null,
                 closed: channel.closed || null,
@@ -90,17 +121,20 @@ const loadCustomChannels = async () => {
             isCustom: true
         }));
 
-        console.log(`Loaded ${channels.length} custom channels, ${streams.length} custom streams, and ${customCategories.size} custom categories`);
+        const customGenres = Array.from(customGenresSet);
+        console.log(`Loaded ${channels.length} custom channels, ${streams.length} custom streams`);
+        console.log(`Custom genres found: ${customGenres.join(', ')}`);
+        
         return { 
             channels, 
             streams, 
-            categories: Array.from(customCategories) 
+            customGenres
         };
     } catch (error) {
         if (error.code !== 'ENOENT') {
             console.error('Error loading custom channels:', error);
         }
-        return { channels: [], streams: [], categories: [] };
+        return { channels: [], streams: [], customGenres: [] };
     }
 };
 
@@ -115,62 +149,28 @@ const initializeConfig = async () => {
             console.log('Added AU to included countries for custom channels');
         }
         
-        // Store custom categories in config
-        config.customCategories = customData.categories;
-        console.log(`Custom categories: ${config.customCategories.join(', ')}`);
+        // Merge custom genres with standard genres (avoiding duplicates)
+        const allGenresSet = new Set([...STANDARD_GENRES, ...customData.customGenres]);
+        config.allGenres = Array.from(allGenresSet).sort();
+        
+        console.log(`Total genres available: ${config.allGenres.length}`);
+        if (customData.customGenres.length > 0) {
+            console.log(`Custom genres: ${customData.customGenres.join(', ')}`);
+        }
         
         return customData;
     } catch (error) {
         console.log('Error initializing config:', error);
-        return { channels: [], streams: [], categories: [] };
+        return { channels: [], streams: [], customGenres: [] };
     }
-};
-
-// Get all available genre options (standard + custom)
-const getAllGenreOptions = () => {
-    const standardGenres = [
-        "animation",
-        "auto",
-        "business",
-        "classic",
-        "comedy",
-        "cooking",
-        "culture",
-        "documentary",
-        "education",
-        "entertainment",
-        "family",
-        "kids",
-        "legislative",
-        "lifestyle",
-        "movies",
-        "music",
-        "general",
-        "religious",
-        "news",
-        "outdoor",
-        "relax",
-        "series",
-        "science",
-        "shop",
-        "sports",
-        "travel",
-        "weather",
-        "xxx"
-    ];
-    
-    // Combine and deduplicate
-    return [...new Set([...standardGenres, ...config.customCategories])].sort();
 };
 
 // Addon Manifest - Dynamic based on config
 const getManifest = () => {
-    const genreOptions = getAllGenreOptions();
-    
     return {
         id: 'org.iptv',
         name: 'IPTV Addon',
-        version: '0.0.4',
+        version: '0.0.5',
         description: `Watch live TV from ${config.includeCountries.join(', ')}`,
         resources: ['catalog', 'meta', 'stream'],
         types: ['tv'],
@@ -182,7 +182,7 @@ const getManifest = () => {
                 {
                     name: 'genre',
                     isRequired: false,
-                    options: genreOptions
+                    options: config.allGenres
                 }
             ],
         })),
@@ -194,23 +194,20 @@ const getManifest = () => {
     };
 };
 
-let manifest = getManifest();
-let addon = new addonBuilder(manifest);
+let manifest;
+let addon;
 
 // Helper Functions
 
 // Convert channel to Stremio accepted Meta object
 const toMeta = (channel) => {
-    // Use custom_categories if available, otherwise fall back to categories
-    const genres = channel.custom_categories && channel.custom_categories.length > 0 
-        ? [...channel.custom_categories, channel.country]
-        : [...(channel.categories || []), channel.country];
+    const genres = [...(channel.categories || []), channel.country].filter(Boolean);
     
     return {
         id: `iptv-${channel.id}`,
         name: channel.name,
         type: 'tv',
-        genres: genres.filter(Boolean),
+        genres: genres,
         poster: channel.logo,
         posterShape: 'square',
         background: channel.logo || null,
@@ -362,67 +359,68 @@ const getAllInfo = async () => {
     return filteredChannelsInfo;
 };
 
-// Addon Handlers
+// Initialize addon builder
+const initializeAddon = () => {
+    manifest = getManifest();
+    addon = new addonBuilder(manifest);
 
-// Catalog Handler
-addon.defineCatalogHandler(async ({ type, id, extra }) => {
-    if (type === 'tv' && id.startsWith('iptv-channels-')) {
-        const country = id.split('-')[2];
-        const allChannels = await getAllInfo();
-        let filteredChannels = allChannels.filter(channel => channel.genres.includes(country));
+    // Catalog Handler
+    addon.defineCatalogHandler(async ({ type, id, extra }) => {
+        if (type === 'tv' && id.startsWith('iptv-channels-')) {
+            const country = id.split('-')[2];
+            const allChannels = await getAllInfo();
+            let filteredChannels = allChannels.filter(channel => channel.genres.includes(country));
 
-        if (extra && extra.genre) {
-            const genres = Array.isArray(extra.genre) ? extra.genre : [extra.genre];
-            filteredChannels = filteredChannels.filter(channel =>
-                genres.some(genre => channel.genres.includes(genre))
-            );
+            if (extra && extra.genre) {
+                const genres = Array.isArray(extra.genre) ? extra.genre : [extra.genre];
+                filteredChannels = filteredChannels.filter(channel =>
+                    genres.some(genre => channel.genres.includes(genre))
+                );
+            }
+
+            console.log(`Serving catalog for ${country} with ${filteredChannels.length} channels${extra?.genre ? ` (genre: ${extra.genre})` : ''}`);
+            return { metas: filteredChannels };
         }
+        return { metas: [] };
+    });
 
-        console.log(`Serving catalog for ${country} with ${filteredChannels.length} channels${extra?.genre ? ` (genre: ${extra.genre})` : ''}`);
-        return { metas: filteredChannels };
-    }
-    return { metas: [] };
-});
-
-// Meta Handler
-addon.defineMetaHandler(async ({ type, id }) => {
-    if (type === 'tv' && id.startsWith('iptv-')) {
-        const channels = await getAllInfo();
-        const channel = channels.find((meta) => meta.id === id);
-        if (channel) {
-            return { meta: channel };
+    // Meta Handler
+    addon.defineMetaHandler(async ({ type, id }) => {
+        if (type === 'tv' && id.startsWith('iptv-')) {
+            const channels = await getAllInfo();
+            const channel = channels.find((meta) => meta.id === id);
+            if (channel) {
+                return { meta: channel };
+            }
         }
-    }
-    return { meta: {} };
-});
+        return { meta: {} };
+    });
 
-// Stream Handler
-addon.defineStreamHandler(async ({ type, id }) => {
-    if (type === 'tv' && id.startsWith('iptv-')) {
-        const channels = await getAllInfo();
-        const channel = channels.find((meta) => meta.id === id);
-        if (channel?.streamInfo) {
-            console.log(`Serving stream id: ${channel.id}${channel.isCustom ? ' [CUSTOM]' : ''}`);
-            return { streams: [channel.streamInfo] };
-        } else {
-            console.log('No matching stream found for channelID:', id);
+    // Stream Handler
+    addon.defineStreamHandler(async ({ type, id }) => {
+        if (type === 'tv' && id.startsWith('iptv-')) {
+            const channels = await getAllInfo();
+            const channel = channels.find((meta) => meta.id === id);
+            if (channel?.streamInfo) {
+                console.log(`Serving stream id: ${channel.id}${channel.isCustom ? ' [CUSTOM]' : ''}`);
+                return { streams: [channel.streamInfo] };
+            } else {
+                console.log('No matching stream found for channelID:', id);
+            }
         }
-    }
-    return { streams: [] };
-});
+        return { streams: [] };
+    });
+};
 
 // Server setup - Dynamic manifest
 app.get('/manifest.json', async (req, res) => {
     // Reinitialize config to check for custom channels
     await initializeConfig();
-    manifest = getManifest();
-    addon = new addonBuilder(manifest);
+    initializeAddon();
     
     res.setHeader('Content-Type', 'application/json');
     res.json(manifest);
 });
-
-serveHTTP(addon.getInterface(), { server: app, path: '/manifest.json', port: PORT });
 
 // Cache management
 const fetchAndCacheInfo = async () => {
@@ -432,6 +430,9 @@ const fetchAndCacheInfo = async () => {
         
         // Reinitialize config to get latest custom categories
         await initializeConfig();
+        
+        // Reinitialize addon with updated genres
+        initializeAddon();
         
         const metas = await getAllInfo();
         console.log(`${metas.length} channel(s) information cached successfully`);
@@ -460,14 +461,18 @@ if (config.enableCustomChannels) {
     watchFile();
 }
 
-// Initial fetch
+// Initial setup and start
 (async () => {
     await initializeConfig();
+    initializeAddon();
     await fetchAndCacheInfo();
+    
+    serveHTTP(addon.getInterface(), { server: app, port: PORT });
+    
+    console.log(`IPTV Addon server running on port ${PORT}`);
+    console.log(`Custom channels: ${config.enableCustomChannels ? 'Enabled' : 'Disabled'}`);
+    console.log(`Available genres: ${config.allGenres.length}`);
 })();
 
 // Schedule fetch based on FETCH_INTERVAL
 setInterval(fetchAndCacheInfo, FETCH_INTERVAL);
-
-console.log(`IPTV Addon server running on port ${PORT}`);
-console.log(`Custom channels: ${config.enableCustomChannels ? 'Enabled' : 'Disabled'}`);
