@@ -52,7 +52,7 @@ const STANDARD_GENRES = [
 // Configuration for channel filtering
 const config = {
     includeLanguages: process.env.INCLUDE_LANGUAGES ? process.env.INCLUDE_LANGUAGES.split(',') : [],
-    includeCountries: process.env.INCLUDE_COUNTRIES ? process.env.INCLUDE_COUNTRIES.split(',') : ['GR'],
+    includeCountries: process.env.INCLUDE_COUNTRIES ? process.env.INCLUDE_COUNTRIES.split(',') : [],
     excludeLanguages: process.env.EXCLUDE_LANGUAGES ? process.env.EXCLUDE_LANGUAGES.split(',') : [],
     excludeCountries: process.env.EXCLUDE_COUNTRIES ? process.env.EXCLUDE_COUNTRIES.split(',') : [],
     excludeCategories: process.env.EXCLUDE_CATEGORIES ? process.env.EXCLUDE_CATEGORIES.split(',') : [],
@@ -82,7 +82,7 @@ const loadCustomChannels = async () => {
         
         // Validate and format custom channels
         const channels = (customData.channels || []).map(channel => {
-            const channelCategories = channel.categories || ['auto'];
+            const channelCategories = channel.categories || ['general'];
             
             // Identify custom genres (not in standard list)
             channelCategories.forEach(cat => {
@@ -97,7 +97,7 @@ const loadCustomChannels = async () => {
                 alt_names: channel.alt_names || [],
                 network: channel.network || null,
                 owners: channel.owners || [],
-                country: channel.country || 'AU',
+                country: channel.country || 'PT', // Default to PT for custom channels
                 categories: channelCategories,
                 is_nsfw: channel.is_nsfw || false,
                 launched: channel.launched || null,
@@ -123,12 +123,14 @@ const loadCustomChannels = async () => {
 
         const customGenres = Array.from(customGenresSet);
         console.log(`Loaded ${channels.length} custom channels, ${streams.length} custom streams`);
-        console.log(`Custom genres found: ${customGenres.join(', ')}`);
+        if (customGenres.length > 0) {
+            console.log(`Custom genres found: ${customGenres.join(', ')}`);
+        }
         
         return { 
             channels, 
             streams, 
-            customGenres
+            customGenres 
         };
     } catch (error) {
         if (error.code !== 'ENOENT') {
@@ -143,10 +145,10 @@ const initializeConfig = async () => {
     try {
         const customData = await loadCustomChannels();
         
-        // Add AU to countries if custom channels exist
-        if (customData.channels.length > 0 && !config.includeCountries.includes('AU')) {
-            config.includeCountries.push('AU');
-            console.log('Added AU to included countries for custom channels');
+        // Add PT to countries if custom channels exist
+        if (customData.channels.length > 0 && !config.includeCountries.includes('PT')) {
+            config.includeCountries.push('PT');
+            console.log('Added PT to included countries for custom channels');
         }
         
         // Merge custom genres with standard genres (avoiding duplicates)
@@ -168,10 +170,10 @@ const initializeConfig = async () => {
 // Addon Manifest - Dynamic based on config
 const getManifest = () => {
     return {
-        id: 'org.iptv',
-        name: 'IPTV Addon',
-        version: '0.0.5',
-        description: `Watch live TV from ${config.includeCountries.join(', ')}`,
+        id: 'org.iptv.pt',
+        name: 'Canais PT',
+        version: '1.0.0',
+        description: `Canais de TV de Portugal`,
         resources: ['catalog', 'meta', 'stream'],
         types: ['tv'],
         catalogs: config.includeCountries.map(country => ({
@@ -188,8 +190,8 @@ const getManifest = () => {
         })),
         idPrefixes: ['iptv-'],
         behaviorHints: { configurable: false, configurationRequired: false },
-        logo: "https://dl.strem.io/addon-logo.png",
-        icon: "https://dl.strem.io/addon-logo.png",
+        logo: "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/portugal/rtp-1-pt.png",
+        icon: "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/portugal/rtp-1-pt.png",
         background: "https://dl.strem.io/addon-background.jpg",
     };
 };
@@ -321,8 +323,8 @@ const getAllInfo = async () => {
 
     // Filter channels based on config
     const filteredChannels = allChannels.filter((channel) => {
-        // Skip filtering for custom channels if they're from AU
-        if (channel.isCustom && channel.country === 'AU') {
+        // Skip country filtering for custom channels if they are from 'PT'
+        if (channel.isCustom && channel.country === 'PT') {
             return streamMap.has(channel.id);
         }
 
